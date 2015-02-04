@@ -1,6 +1,6 @@
 /*
- *  TUN - Universal TUN/TAP device driver.
- *  Copyright (C) 1999-2002 Maxim Krasnyansky <maxk@qualcomm.com>
+ *  VTUN - filter tun device driver.
+ *  Copyright (C) 2015 Zhu Yanjun <yanjun.zhu@windriver.com>
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -12,34 +12,15 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  *  GNU General Public License for more details.
  *
- *  $Id: tun.c,v 1.15 2002/03/01 02:44:24 maxk Exp $
- */
-
-/*
- *  Changes:
- *
- *  Mike Kershaw <dragorn@kismetwireless.net> 2005/08/14
- *    Add TUNSETLINK ioctl to set the link encapsulation
- *
- *  Mark Smith <markzzzsmith@yahoo.com.au>
- *    Use eth_random_addr() for tap MAC address.
- *
- *  Harald Roelle <harald.roelle@ifi.lmu.de>  2004/04/20
- *    Fixes in packet dropping, queue length setting and queue wakeup.
- *    Increased default tx queue length.
- *    Added ethtool API.
- *    Minor cleanups
- *
- *  Daniel Podlejski <underley@underley.eu.org>
- *    Modifications for 2.3.99-pre5 kernel.
+ *  $Id: vtun.c,v 0.1 2015/02/03 02:44:24 Zhu Yanjun $
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#define DRV_NAME	"tun"
-#define DRV_VERSION	"1.6"
-#define DRV_DESCRIPTION	"Universal TUN/TAP device driver"
-#define DRV_COPYRIGHT	"(C) 1999-2004 Max Krasnyansky <maxk@qualcomm.com>"
+#define DRV_NAME	"vtun"
+#define DRV_VERSION	"0.1"
+#define DRV_DESCRIPTION	"VTUN device driver"
+#define DRV_COPYRIGHT	"(C) 2015 Zhu Yanjun <yanjun.zhu@windriver.com>"
 
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -76,7 +57,7 @@
 #include <asm/uaccess.h>
 
 /* Uncomment to enable debugging */
-/* #define TUN_DEBUG 1 */
+#define TUN_DEBUG 1 
 
 #ifdef TUN_DEBUG
 static int debug;
@@ -745,6 +726,10 @@ static void tun_net_uninit(struct net_device *dev)
 /* Net device open. */
 static int tun_net_open(struct net_device *dev)
 {
+	/*begin:up vtun device to accept packets zhuyj*/
+	netif_carrier_on(dev);
+	dev->flags |= IFF_RUNNING;
+	/*end zhuyj*/
 	netif_tx_start_all_queues(dev);
 	return 0;
 }
@@ -952,7 +937,9 @@ static void tun_net_init(struct net_device *dev)
 
 		/* Zero header length */
 		dev->type = ARPHRD_NONE;
-		dev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
+		/*zhuyj, begin: POINTOPOINT is unnecessary, remove IFF_POINTOPOINT*/
+		dev->flags = IFF_NOARP | IFF_MULTICAST;
+		/*zhuyj, end*/
 		dev->tx_queue_len = TUN_READQ_SIZE;  /* We prefer our own queue length */
 		break;
 
@@ -2226,7 +2213,7 @@ static void tun_chr_show_fdinfo(struct seq_file *m, struct file *f)
 }
 #endif
 
-static const struct file_operations tun_fops = {
+static const struct file_operations vtun_fops = {
 	.owner	= THIS_MODULE,
 	.llseek = no_llseek,
 	.read  = new_sync_read,
@@ -2247,10 +2234,10 @@ static const struct file_operations tun_fops = {
 };
 
 static struct miscdevice tun_miscdev = {
-	.minor = TUN_MINOR,
-	.name = "tun",
-	.nodename = "net/tun",
-	.fops = &tun_fops,
+	.minor = VTUN_MINOR,
+	.name = "vtun",
+	.nodename = "net/vtun",
+	.fops = &vtun_fops,
 };
 
 /* ethtool interface */
@@ -2314,14 +2301,18 @@ static const struct ethtool_ops tun_ethtool_ops = {
 	.get_ts_info	= ethtool_op_get_ts_info,
 };
 
-
-static int __init tun_init(void)
+static int __init vtun_init(void)
 {
 	int ret = 0;
 
+#ifdef TUN_DEBUG
+	printk(KERN_DEBUG "TUN_DEBUG define!\n");
+#else
+	printk(KERN_DEBUG "TUN_DEBUG not define!\n");
+#endif
+
 	pr_info("%s, %s\n", DRV_DESCRIPTION, DRV_VERSION);
 	pr_info("%s\n", DRV_COPYRIGHT);
-
 	ret = rtnl_link_register(&tun_link_ops);
 	if (ret) {
 		pr_err("Can't register link_ops\n");
@@ -2330,42 +2321,42 @@ static int __init tun_init(void)
 
 	ret = misc_register(&tun_miscdev);
 	if (ret) {
-		pr_err("Can't register misc device %d\n", TUN_MINOR);
+		pr_err("Can't register misc device %d\n", VTUN_MINOR);
 		goto err_misc;
 	}
 	return  0;
 err_misc:
 	rtnl_link_unregister(&tun_link_ops);
 err_linkops:
+
 	return ret;
 }
 
-static void tun_cleanup(void)
+static void vtun_cleanup(void)
 {
 	misc_deregister(&tun_miscdev);
 	rtnl_link_unregister(&tun_link_ops);
 }
-
 /* Get an underlying socket object from tun file.  Returns error unless file is
  * attached to a device.  The returned object works like a packet socket, it
  * can be used for sock_sendmsg/sock_recvmsg.  The caller is responsible for
  * holding a reference to the file for as long as the socket is in use. */
-struct socket *tun_get_socket(struct file *file)
+struct socket *vtun_get_socket(struct file *file)
 {
 	struct tun_file *tfile;
-	if (file->f_op != &tun_fops)
+	if (file->f_op != &vtun_fops)
 		return ERR_PTR(-EINVAL);
 	tfile = file->private_data;
 	if (!tfile)
 		return ERR_PTR(-EBADFD);
 	return &tfile->socket;
 }
-EXPORT_SYMBOL_GPL(tun_get_socket);
+EXPORT_SYMBOL_GPL(vtun_get_socket);
 
-module_init(tun_init);
-module_exit(tun_cleanup);
+module_init(vtun_init);
+module_exit(vtun_cleanup);
 MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_AUTHOR(DRV_COPYRIGHT);
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_MISCDEV(TUN_MINOR);
-MODULE_ALIAS("devname:net/tun");
+MODULE_ALIAS_MISCDEV(VTUN_MINOR);
+MODULE_ALIAS("devname:net/vtun");

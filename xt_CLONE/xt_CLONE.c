@@ -23,7 +23,7 @@
 #include <net/ip6_route.h>
 #include <net/route.h>
 #include <linux/netfilter/x_tables.h>
-#include <linux/netfilter/xt_TEE.h>
+#include "xt_CLONE.h"
 
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
 #	define WITH_CONNTRACK 1

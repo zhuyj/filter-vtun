@@ -1,10 +1,5 @@
 /*
- *	"TEE" target extension for Xtables
- *	Copyright © Sebastian Claßen, 2007
- *	Jan Engelhardt, 2007-2010
- *
- *	based on ipt_ROUTE.c from Cédric de Launois
- *	<delaunois@info.ucl.be>
+ *	based on xt_TEE.c in linux kernel 3.19-rc6 
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -266,7 +261,7 @@ static void tee_tg_destroy(const struct xt_tgdtor_param *par)
 
 static struct xt_target tee_tg_reg[] __read_mostly = {
 	{
-		.name       = "TEE",
+		.name       = "CLONE",
 		.revision   = 1,
 		.family     = NFPROTO_IPV4,
 		.target     = tee_tg4,
@@ -277,7 +272,7 @@ static struct xt_target tee_tg_reg[] __read_mostly = {
 	},
 #if IS_ENABLED(CONFIG_IPV6)
 	{
-		.name       = "TEE",
+		.name       = "CLONE",
 		.revision   = 1,
 		.family     = NFPROTO_IPV6,
 		.target     = tee_tg6,
@@ -301,9 +296,8 @@ static void __exit tee_tg_exit(void)
 
 module_init(tee_tg_init);
 module_exit(tee_tg_exit);
-MODULE_AUTHOR("Sebastian Claßen <sebastian.classen@freenet.ag>");
-MODULE_AUTHOR("Jan Engelhardt <jengelh@medozas.de>");
-MODULE_DESCRIPTION("Xtables: Reroute packet copy");
+MODULE_AUTHOR("Zhu Yanjun <yanjun.zhu@windriver.com>");
+MODULE_DESCRIPTION("Xtables: clone, filter and reroute packets");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("ipt_TEE");
-MODULE_ALIAS("ip6t_TEE");
+MODULE_ALIAS("ipt_CLONE");
+MODULE_ALIAS("ip6t_CLONE");

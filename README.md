@@ -22,3 +22,16 @@ This will create a subsystem in linux3.19-rc6. This subsystem will clone the pac
     ├── xt_CLONE.c
     └── xt_CLONE.h
 
+FAQ:
+1. How to build this project?
+   This project is based on Ubuntu14.04 Desktop. It depends on
+   linux kernel 3.19-rc6.
+   In this case, please follow these steps:
+    a) git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-git
+    b) git checkout -f v3.19-rc6
+    c) cp /usr/src/linux-headers-3.13.0-44-generic/.config the-directory-kernel/.config
+    d) make-kpkg --initrd --append-to-version=-dev kernel_image kernel-headers
+    e) dpkg -i *.deb
+    f) git clone https://github.com/zhuyj/filter-vtun
+    g) cd the-directory-filter-vtun
+    h) make

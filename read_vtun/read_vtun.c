@@ -1,3 +1,7 @@
+/*read the patckets from /dev/net/vtun, then store these packets
+ * in a local file.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,9 +21,14 @@
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000   
+
+#define REMOVE 0
+
+#if REMOVE
 #define CLIENT 0
 #define SERVER 1
 #define PORT 55555
+#endif
 
 /* some common lengths */
 #define IP_HDR_LEN 20
@@ -28,6 +37,49 @@
 
 int debug;
 char *progname;
+
+#if !REMOVE
+static uint32_t m_secs = 0;
+static uint32_t m_usecs = 0;
+// pcap header
+typedef struct pcap_hdr_s {
+	uint32_t magic_number; /* magic number */
+	uint16_t version_major; /* major version number */
+	uint16_t version_minor; /* minor version number */
+	int32_t thiszone; /* GMT to local correction */
+	uint32_t sigfigs; /* accuracy of timestamps */
+	uint32_t snaplen; /* max length of captured packets, in octets */
+	uint32_t network; /* data link type */
+} pcap_hdr_t;
+//packet header
+typedef struct pcaprec_hdr_s {
+	uint32_t ts_sec; /* timestamp seconds */
+	uint32_t ts_usec; /* timestamp microseconds */
+	uint32_t incl_len; /* number of octets of packet saved in file */
+	uint32_t orig_len; /* actual length of packet */
+} pcaprec_hdr_t;
+
+void open_pcap()
+{
+	FILE *fp = NULL;
+	// Create pcap file.
+	fp = fopen("/tmp/temp.pcap", "w+");
+	if (fp) {
+		// pcap header;
+		struct pcap_hdr_s pcap_h;
+		pcap_h.magic_number = 0xa1b2c3d4;
+		pcap_h.version_major = 2;
+		pcap_h.version_minor = 4;
+		pcap_h.thiszone = 0;
+		pcap_h.sigfigs = 0;
+		pcap_h.snaplen = 65535;
+		pcap_h.network = 1;
+		fwrite(&pcap_h, 1, sizeof(pcap_h), fp);
+	}
+	fflush(fp);
+	fclose(fp);
+}
+#endif
 
 /**************************************************************************
  * tun_alloc: allocates or reconnects to a tun/tap device. The caller     *
@@ -164,9 +216,11 @@ int main(int argc, char *argv[]) {
   uint16_t nread, nwrite, plength;
 //  uint16_t total_len, ethertype;
   char buffer[BUFSIZE];
+#if REMOVE
   struct sockaddr_in local, remote;
   char remote_ip[16] = "";
   unsigned short int port = PORT;
+#endif
   int sock_fd, net_fd, optval = 1;
   socklen_t remotelen;
   int cliserv = -1;    /* must be specified on cmd line */
@@ -186,6 +240,7 @@ int main(int argc, char *argv[]) {
       case 'i':
         strncpy(if_name,optarg,IFNAMSIZ-1);
         break;
+#if REMOVE
       case 's':
         cliserv = SERVER;
         break;
@@ -196,6 +251,7 @@ int main(int argc, char *argv[]) {
       case 'p':
         port = atoi(optarg);
         break;
+#endif
       case 'u':
         flags = IFF_TUN;
         break;
@@ -220,13 +276,16 @@ int main(int argc, char *argv[]) {
   if(*if_name == '\0'){
     my_err("Must specify interface name!\n");
     usage();
-  }else if(cliserv < 0){
+  }
+#if REMOVE
+else if(cliserv < 0){
     my_err("Must specify client or server mode!\n");
     usage();
   }else if((cliserv == CLIENT)&&(*remote_ip == '\0')){
     my_err("Must specify server address!\n");
     usage();
   }
+#endif
 
   /* initialize tun/tap interface */
   if ( (tap_fd = tun_alloc(if_name, flags | IFF_NO_PI)) < 0 ) {
@@ -240,7 +299,7 @@ int main(int argc, char *argv[]) {
     perror("socket()");
     exit(1);
   }
-
+#if REMOVE
   if(cliserv==CLIENT){
     /* Client, try to connect to server */
 
@@ -292,10 +351,14 @@ int main(int argc, char *argv[]) {
 
     do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
   }
-  
+#endif  
   /* use select() to handle two descriptors at once */
+#if REMOVE
   maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
-
+#else
+	maxfd = tap_fd;
+	open_pcap();
+#endif
   while(1) {
     int ret;
     fd_set rd_set;
@@ -322,14 +385,36 @@ int main(int argc, char *argv[]) {
       tap2net++;
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
+#if REMOVE
       /* write length + packet */
       plength = htons(nread);
       nwrite = cwrite(net_fd, (char *)&plength, sizeof(plength));
       nwrite = cwrite(net_fd, buffer, nread);
-      
+#else
+{
+      FILE *fp = NULL;
+      if ((fp=fopen("/tmp/temp.pcap","ab")) == NULL) {
+          perror("fopen error");
+          exit(1);
+      }
+	struct pcaprec_hdr_s pac_h;
+	pac_h.ts_sec = m_secs++;
+	pac_h.ts_usec = ++m_usecs;
+	pac_h.incl_len = nread;
+	pac_h.orig_len = nread;
+	fwrite(&pac_h, 1, sizeof(pac_h), fp);
+	// packet
+	fwrite(buffer, 1, nread, fp);
+
+//      fwrite(&nread, sizeof(nread), 1, fp);
+//      fwrite(buffer, sizeof(char), nread, fp);
+	fclose(fp);
+}      
+#endif
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
+#if REMOVE
     if(FD_ISSET(net_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
@@ -351,6 +436,7 @@ int main(int argc, char *argv[]) {
       nwrite = cwrite(tap_fd, buffer, nread);
       do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
+#endif
   }
   
   return(0);

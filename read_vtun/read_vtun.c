@@ -22,11 +22,6 @@
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000
 
-/* some common lengths */
-#define IP_HDR_LEN 20
-#define ETH_HDR_LEN 14
-#define ARP_PKT_LEN 28
-
 int debug;
 char *progname;
 
@@ -50,11 +45,15 @@ typedef struct pcaprec_hdr_s {
 	uint32_t orig_len;	/* actual length of packet */
 } pcaprec_hdr_t;
 
-void open_pcap()
+void open_pcap(char *filename)
 {
 	FILE *fp = NULL;
+
+	if (NULL == filename)
+		return;
+
 	// Create pcap file.
-	fp = fopen("/tmp/temp.pcap", "w+");
+	fp = fopen(filename, "w+");
 	if (fp) {
 		// pcap header;
 		struct pcap_hdr_s pcap_h;
@@ -121,43 +120,6 @@ int cread(int fd, char *buf, int n)
 	return nread;
 }
 
-#if 0
-/**************************************************************************
- * cwrite: write routine that checks for errors and exits if an error is  *
- *         returned.                                                      *
- **************************************************************************/
-int cwrite(int fd, char *buf, int n)
-{
-
-	int nwrite;
-
-	if ((nwrite = write(fd, buf, n)) < 0) {
-		perror("Writing data");
-		exit(1);
-	}
-	return nwrite;
-}
-#endif
-/**************************************************************************
- * read_n: ensures we read exactly n bytes, and puts those into "buf".    *
- *         (unless EOF, of course)                                        *
- **************************************************************************/
-int read_n(int fd, char *buf, int n)
-{
-
-	int nread, left = n;
-
-	while (left > 0) {
-		if ((nread = cread(fd, buf, left)) == 0) {
-			return 0;
-		} else {
-			left -= nread;
-			buf += nread;
-		}
-	}
-	return n;
-}
-
 /**************************************************************************
  * do_debug: prints debugging stuff (doh!)                                *
  **************************************************************************/
@@ -192,14 +154,14 @@ void my_err(char *msg, ...)
 void usage(void)
 {
 	fprintf(stderr, "Usage:\n");
-	fprintf(stderr,
-		"%s -i <ifacename> [-s|-c <serverIP>] [-p <port>] [-u|-a] [-d]\n",
+	fprintf(stderr,	"%s -i <ifacename> [-f <file-path-name>] [-d]\n", 
 		progname);
 	fprintf(stderr, "%s -h\n", progname);
 	fprintf(stderr, "\n");
 	fprintf(stderr,
 		"-i <ifacename>: Name of interface to use (mandatory)\n");
 	fprintf(stderr, "-d: outputs debug information while running\n");
+	fprintf(stderr, "-f: pcap file path, such as:/tmp/temp.pcap\n");
 	fprintf(stderr, "-h: prints this help text\n");
 	exit(1);
 }
@@ -215,12 +177,20 @@ int main(int argc, char *argv[])
 	char buffer[BUFSIZE];
 	int sock_fd;
 	unsigned long int tap2net = 0;
+	char file_pathname[256] = {0};
 
 	progname = argv[0];
 
+	/*the default pcap file path: /tmp/temp.pcap*/
+	strncpy(file_pathname, "/tmp/temp.pcap", 255);
+
 	/* Check command line options */
-	while ((option = getopt(argc, argv, "i:sc:p:uahd")) > 0) {
+	while ((option = getopt(argc, argv, "i:f:h:d")) > 0) {
 		switch (option) {
+		case 'f':
+			memset(file_pathname, 0, 256);
+			strncpy(file_pathname, optarg, 255);
+			break;
 		case 'd':
 			debug = 1;
 			break;
@@ -264,7 +234,7 @@ int main(int argc, char *argv[])
 
 	/* use select() to handle two descriptors at once */
 	maxfd = tap_fd;
-	open_pcap();
+	open_pcap(file_pathname);
 	while (1) {
 		int ret;
 		fd_set rd_set;
@@ -293,24 +263,22 @@ int main(int argc, char *argv[])
 			    ("TAP2NET %lu: Read %d bytes from the tap interface\n",
 			     tap2net, nread);
 
-			{
-				FILE *fp = NULL;
-				if ((fp =
-				     fopen("/tmp/temp.pcap", "ab")) == NULL) {
-					perror("fopen error");
-					exit(1);
-				}
-				struct pcaprec_hdr_s pac_h;
-				pac_h.ts_sec = m_secs++;
-				pac_h.ts_usec = ++m_usecs;
-				pac_h.incl_len = nread;
-				pac_h.orig_len = nread;
-				fwrite(&pac_h, 1, sizeof(pac_h), fp);
-				// packet
-				fwrite(buffer, 1, nread, fp);
-
-				fclose(fp);
+			FILE *fp = NULL;
+			if ((fp =
+			     fopen(file_pathname, "ab")) == NULL) {
+				perror("fopen error");
+				exit(1);
 			}
+			struct pcaprec_hdr_s pac_h;
+			pac_h.ts_sec = m_secs++;
+			pac_h.ts_usec = ++m_usecs;
+			pac_h.incl_len = nread;
+			pac_h.orig_len = nread;
+			fwrite(&pac_h, 1, sizeof(pac_h), fp);
+			// packet
+			fwrite(buffer, 1, nread, fp);
+
+			fclose(fp);
 		}	
 	}
 

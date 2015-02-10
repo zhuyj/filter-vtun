@@ -35,3 +35,7 @@ FAQ:
     f) git clone https://github.com/zhuyj/filter-vtun
     g) cd the-directory-filter-vtun
     h) make
+
+2. What is the final result?
+   This tool will generate a pcap file in /tmp/temp.pcap. This temp.pcap is compatible with
+   tcpdump and wireshark. We can ananlyze this file by tcpdump or wireshark.

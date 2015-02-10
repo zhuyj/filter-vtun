@@ -884,6 +884,7 @@ static const struct net_device_ops tun_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= tun_poll_controller,
 #endif
+	.ndo_set_mac_address	= eth_mac_addr,
 };
 
 static const struct net_device_ops tap_netdev_ops = {
@@ -929,16 +930,11 @@ static void tun_net_init(struct net_device *dev)
 	switch (tun->flags & TUN_TYPE_MASK) {
 	case IFF_TUN:
 		dev->netdev_ops = &tun_netdev_ops;
+		ether_setup(dev);
 
-		/* Point-to-Point TUN Device */
-		dev->hard_header_len = 0;
-		dev->addr_len = 0;
-		dev->mtu = 1500;
-
-		/* Zero header length */
-		dev->type = ARPHRD_NONE;
 		/*zhuyj, begin: POINTOPOINT is unnecessary, remove IFF_POINTOPOINT*/
 		dev->flags = IFF_NOARP | IFF_MULTICAST;
+		eth_hw_addr_random(dev);
 		/*zhuyj, end*/
 		dev->tx_queue_len = TUN_READQ_SIZE;  /* We prefer our own queue length */
 		break;
@@ -2304,12 +2300,6 @@ static const struct ethtool_ops tun_ethtool_ops = {
 static int __init vtun_init(void)
 {
 	int ret = 0;
-
-#ifdef TUN_DEBUG
-	printk(KERN_DEBUG "TUN_DEBUG define!\n");
-#else
-	printk(KERN_DEBUG "TUN_DEBUG not define!\n");
-#endif
 
 	pr_info("%s, %s\n", DRV_DESCRIPTION, DRV_VERSION);
 	pr_info("%s\n", DRV_COPYRIGHT);

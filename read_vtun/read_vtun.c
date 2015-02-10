@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <signal.h>
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000
@@ -44,31 +45,6 @@ typedef struct pcaprec_hdr_s {
 	uint32_t incl_len;	/* number of octets of packet saved in file */
 	uint32_t orig_len;	/* actual length of packet */
 } pcaprec_hdr_t;
-
-void open_pcap(char *filename)
-{
-	FILE *fp = NULL;
-
-	if (NULL == filename)
-		return;
-
-	// Create pcap file.
-	fp = fopen(filename, "w+");
-	if (fp) {
-		// pcap header;
-		struct pcap_hdr_s pcap_h;
-		pcap_h.magic_number = 0xa1b2c3d4;
-		pcap_h.version_major = 2;
-		pcap_h.version_minor = 4;
-		pcap_h.thiszone = 0;
-		pcap_h.sigfigs = 0;
-		pcap_h.snaplen = 65535;
-		pcap_h.network = 1;
-		fwrite(&pcap_h, 1, sizeof(pcap_h), fp);
-	}
-	fflush(fp);
-	fclose(fp);
-}
 
 /**************************************************************************
  * tun_alloc: allocates or reconnects to a tun/tap device. The caller     *
@@ -166,10 +142,23 @@ void usage(void)
 	exit(1);
 }
 
+int quit_or_not = 1;
+void sig_handler(int sig)
+{
+	switch (sig) {
+	case SIGINT:
+	case SIGQUIT:
+		fprintf(stderr, "quit, signal:%d\n", sig);
+		quit_or_not = 0;
+	default:
+		fprintf(stderr, "signal:%d\n", sig);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 
-	int tap_fd, option;
+	int tap_fd, option, ret;
 	int flags = IFF_TUN;
 	char if_name[IFNAMSIZ] = "";
 	int maxfd;
@@ -178,6 +167,7 @@ int main(int argc, char *argv[])
 	int sock_fd;
 	unsigned long int tap2net = 0;
 	char file_pathname[256] = {0};
+	FILE *fp = NULL;
 
 	progname = argv[0];
 
@@ -219,6 +209,10 @@ int main(int argc, char *argv[])
 		usage();
 	}
 
+	/*register signal*/
+	signal(SIGQUIT, sig_handler);
+	signal(SIGINT, sig_handler);
+
 	/* initialize tun/tap interface */
 	if ((tap_fd = tun_alloc(if_name, flags | IFF_NO_PI)) < 0) {
 		my_err("Error connecting to tun/tap interface %s!\n", if_name);
@@ -234,9 +228,23 @@ int main(int argc, char *argv[])
 
 	/* use select() to handle two descriptors at once */
 	maxfd = tap_fd;
-	open_pcap(file_pathname);
-	while (1) {
-		int ret;
+
+        // Create pcap file.
+	fp = fopen(file_pathname, "w+");
+	if (fp) {
+		// pcap header;
+		struct pcap_hdr_s pcap_h;
+		pcap_h.magic_number = 0xa1b2c3d4;
+		pcap_h.version_major = 2;
+		pcap_h.version_minor = 4;
+		pcap_h.thiszone = 0;
+		pcap_h.sigfigs = 0;
+		pcap_h.snaplen = 65535;
+		pcap_h.network = 1;
+		fwrite(&pcap_h, 1, sizeof(pcap_h), fp);
+	}
+
+	while (quit_or_not) {
 		fd_set rd_set;
 
 		FD_ZERO(&rd_set);
@@ -263,9 +271,7 @@ int main(int argc, char *argv[])
 			    ("TAP2NET %lu: Read %d bytes from the tap interface\n",
 			     tap2net, nread);
 
-			FILE *fp = NULL;
-			if ((fp =
-			     fopen(file_pathname, "ab")) == NULL) {
+			if ( fp == NULL) {
 				perror("fopen error");
 				exit(1);
 			}
@@ -277,9 +283,12 @@ int main(int argc, char *argv[])
 			fwrite(&pac_h, 1, sizeof(pac_h), fp);
 			// packet
 			fwrite(buffer, 1, nread, fp);
-
-			fclose(fp);
 		}	
+	}
+
+	if (0 == quit_or_not) {
+		fflush(fp);
+		fclose(fp);
 	}
 
 	return (0);

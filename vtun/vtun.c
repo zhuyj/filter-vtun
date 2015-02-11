@@ -732,12 +732,6 @@ static void tun_net_uninit(struct net_device *dev)
 /* Net device open. */
 static int tun_net_open(struct net_device *dev)
 {
-//	struct tun_struct *tun = netdev_priv(dev);
-
-	/*begin: set default speed 1000M zhuyj*/
-//	tun->flags |= VTUN_CTRL_SPD_1000;
-	/*end zhuyj*/
-
 	/*begin:up vtun device to accept packets zhuyj*/
 	netif_carrier_on(dev);
 	dev->flags |= IFF_RUNNING;

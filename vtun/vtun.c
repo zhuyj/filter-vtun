@@ -62,6 +62,12 @@
 #ifdef TUN_DEBUG
 static int debug;
 
+/*tun device flags*/
+/*add speed control, default 1000M*/
+#define VTUN_CTRL_SPD_10	0x2000
+#define VTUN_CTRL_SPD_100	0x4000
+#define VTUN_CTRL_SPD_1000	0x8000
+
 #define tun_debug(level, tun, fmt, args...)			\
 do {								\
 	if (tun->debug)						\
@@ -726,10 +732,17 @@ static void tun_net_uninit(struct net_device *dev)
 /* Net device open. */
 static int tun_net_open(struct net_device *dev)
 {
+//	struct tun_struct *tun = netdev_priv(dev);
+
+	/*begin: set default speed 1000M zhuyj*/
+//	tun->flags |= VTUN_CTRL_SPD_1000;
+	/*end zhuyj*/
+
 	/*begin:up vtun device to accept packets zhuyj*/
 	netif_carrier_on(dev);
 	dev->flags |= IFF_RUNNING;
 	/*end zhuyj*/
+	
 	netif_tx_start_all_queues(dev);
 	return 0;
 }
@@ -737,6 +750,11 @@ static int tun_net_open(struct net_device *dev)
 /* Net device close. */
 static int tun_net_close(struct net_device *dev)
 {
+	/*begin:up vtun device to accept packets zhuyj*/
+	netif_carrier_off(dev);
+	dev->flags &= ~IFF_RUNNING;
+	/*end zhuyj*/
+
 	netif_tx_stop_all_queues(dev);
 	return 0;
 }
@@ -931,6 +949,10 @@ static void tun_net_init(struct net_device *dev)
 	case IFF_TUN:
 		dev->netdev_ops = &tun_netdev_ops;
 		ether_setup(dev);
+
+		/*begin: set default speed 1000M zhuyj*/
+		tun->flags |= VTUN_CTRL_SPD_1000;
+		/*end zhuyj*/
 
 		/*zhuyj, begin: POINTOPOINT is unnecessary, remove IFF_POINTOPOINT*/
 		dev->flags = IFF_NOARP | IFF_MULTICAST;
@@ -2240,9 +2262,19 @@ static struct miscdevice tun_miscdev = {
 
 static int tun_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
+	struct tun_struct *tun = netdev_priv(dev);
+
+	/*begin:get the speed of vtun*/
+	if (tun->flags & VTUN_CTRL_SPD_1000) {
+		ethtool_cmd_speed_set(cmd, SPEED_1000);
+	} else if (tun->flags & VTUN_CTRL_SPD_100) {
+		ethtool_cmd_speed_set(cmd, SPEED_100);
+	} else
+		ethtool_cmd_speed_set(cmd, SPEED_10);
+	/*end*/
+
 	cmd->supported		= 0;
 	cmd->advertising	= 0;
-	ethtool_cmd_speed_set(cmd, SPEED_1000);
 	cmd->duplex		= DUPLEX_FULL;
 	cmd->port		= PORT_TP;
 	cmd->phy_address	= 0;
@@ -2270,6 +2302,27 @@ static void tun_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info
 	}
 }
 
+static int vtun_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+{
+	struct tun_struct *tun = netdev_priv(dev);
+	u32 speed = ethtool_cmd_speed(cmd);
+
+	if (10 == speed) {
+		tun->flags &= ~VTUN_CTRL_SPD_100;
+		tun->flags &= ~VTUN_CTRL_SPD_1000;
+		tun->flags |= VTUN_CTRL_SPD_10;
+	} else if (100 == speed) {
+		tun->flags &= ~VTUN_CTRL_SPD_10;
+		tun->flags &= ~VTUN_CTRL_SPD_1000;
+		tun->flags |= VTUN_CTRL_SPD_100;
+	} else {
+		tun->flags &= ~VTUN_CTRL_SPD_10;
+		tun->flags &= ~VTUN_CTRL_SPD_100;
+		tun->flags |= VTUN_CTRL_SPD_1000;
+	}
+	return 0;
+}
+
 static u32 tun_get_msglevel(struct net_device *dev)
 {
 #ifdef TUN_DEBUG
@@ -2290,6 +2343,7 @@ static void tun_set_msglevel(struct net_device *dev, u32 value)
 
 static const struct ethtool_ops tun_ethtool_ops = {
 	.get_settings	= tun_get_settings,
+	.set_settings	= vtun_set_settings,
 	.get_drvinfo	= tun_get_drvinfo,
 	.get_msglevel	= tun_get_msglevel,
 	.set_msglevel	= tun_set_msglevel,

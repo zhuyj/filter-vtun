@@ -2300,27 +2300,27 @@ static int vtun_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
 {
 	struct tun_struct *tun = netdev_priv(dev);
 	u32 speed = ethtool_cmd_speed(cmd);
-
-	/* Clear speed flag */
-	tun->flags &= ~(VTUN_CTRL_SPD_10 | 
-			VTUN_CTRL_SPD_100 | 
-			VTUN_CTRL_SPD_1000);
+	int ret = 0;
 
 	switch (speed) {
 		case 10:
+			tun->flags &= ~(VTUN_CTRL_SPD_100 | VTUN_CTRL_SPD_1000);
 			tun->flags |= VTUN_CTRL_SPD_10;
 			break;
 		case 100:
+			tun->flags &= ~(VTUN_CTRL_SPD_10 | VTUN_CTRL_SPD_1000);
 			tun->flags |= VTUN_CTRL_SPD_100;
 			break;
 		case 1000:
+			tun->flags &= ~(VTUN_CTRL_SPD_10 | VTUN_CTRL_SPD_100);
 			tun->flags |= VTUN_CTRL_SPD_1000;
 			break;
 		default:
+			ret = -EINVAL;
 			tun_debug(KERN_INFO, tun, "wrong speed");
 	}
 
-	return 0;
+	return ret;
 }
 
 static u32 tun_get_msglevel(struct net_device *dev)

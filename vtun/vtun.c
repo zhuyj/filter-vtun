@@ -734,7 +734,6 @@ static int tun_net_open(struct net_device *dev)
 {
 	/*begin:up vtun device to accept packets zhuyj*/
 	netif_carrier_on(dev);
-	dev->flags |= IFF_RUNNING;
 	/*end zhuyj*/
 	
 	netif_tx_start_all_queues(dev);

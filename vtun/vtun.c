@@ -56,6 +56,8 @@
 
 #include <asm/uaccess.h>
 
+#include <linux/proc_fs.h>
+
 /* Uncomment to enable debugging */
 #define TUN_DEBUG 1 
 
@@ -745,7 +747,6 @@ static int tun_net_close(struct net_device *dev)
 {
 	/*begin:up vtun device to accept packets zhuyj*/
 	netif_carrier_off(dev);
-	dev->flags &= ~IFF_RUNNING;
 	/*end zhuyj*/
 
 	netif_tx_stop_all_queues(dev);
@@ -2350,6 +2351,124 @@ static const struct ethtool_ops tun_ethtool_ops = {
 	.get_ts_info	= ethtool_op_get_ts_info,
 };
 
+#define FILTER_RULES_NUM 16
+struct vtun_filter {
+	int count;
+	__be32 src_ip;
+	__be32 dst_ip;
+} filter_rules[FILTER_RULES_NUM];
+
+static struct proc_dir_entry *vtun_proc_entry = NULL;
+
+static ssize_t vtun_write_rules(struct file *file, const char __user *buffer,
+				  size_t count, loff_t *pos)
+{
+	int len = 127, i;
+	char temp[128] = {0};
+	__be32 c1, c2, c3, c4, d1, d2, d3, d4;
+	__be32 lsrc_ip;
+	__be32 ldst_ip;
+
+	if (len > count)
+		len = count;
+
+	if (copy_from_user(temp, buffer, len))
+		return -EFAULT;
+
+	printk(KERN_DEBUG "%s\n", temp);
+	sscanf(temp,"srcip=%d.%d.%d.%d,dstip=%d.%d.%d.%d", &c1, &c2, &c3, &c4, &d1, &d2, &d3, &d4);
+	printk(KERN_DEBUG "%d.%d.%d.%d,%d.%d.%d.%d\n", c1, c2, c3, c4, d1, d2, d3, d4);
+	if (((c1 + c2 + c3 + c4) > 255 * 4) ||
+		((d1 + d2 + d3 + d4) > 255 * 4)) {
+		pr_err("Input ip address is wrong!\n");
+		return count;
+	}
+
+	lsrc_ip = c4 + (c3 << 8) +
+			(c2 << 16) + (c1 << 24);
+	ldst_ip = d4 + (d3 << 8) +
+			(d2 << 16) + (d1 << 24);
+
+	printk(KERN_DEBUG "src_ip:0x%08x, dst_ip:0x%08x\n", lsrc_ip, ldst_ip);
+
+	for (i=0; i<FILTER_RULES_NUM; i++) {
+		if (filter_rules[i].count == -1) {
+			filter_rules[i].count = i;
+			filter_rules[i].src_ip = lsrc_ip;
+			filter_rules[i].dst_ip = ldst_ip;
+			break;
+		}
+	}
+
+	return count;
+}
+
+static int vtun_proc_show(struct seq_file *m, void *v)
+{
+	unsigned long	ret = 0;
+	int i;
+
+	seq_printf(m, "srcip=xxx.xxx.xxx.xxx,dstip=xxx.xxx.xxx.xxx\n");
+	for (i=0; i<FILTER_RULES_NUM; i++) {
+		if (filter_rules[i].count != -1) {
+			unsigned char c1, c2, c3, c4, d1, d2, d3, d4;
+			c1 = (filter_rules[i].src_ip >> 24) & 0xFF;
+			c2 = (filter_rules[i].src_ip >> 16) & 0xFF;
+			c3 = (filter_rules[i].src_ip >> 8) & 0xFF;
+			c4 = filter_rules[i].src_ip & 0xFF;
+			d1 = (filter_rules[i].dst_ip >> 24) & 0xFF;
+			d2 = (filter_rules[i].dst_ip >> 16) & 0xFF;
+			d3 = (filter_rules[i].dst_ip >> 8) & 0xFF;
+			d4 = filter_rules[i].dst_ip & 0xFF;
+
+			seq_printf(m, "srcip=%d.%d.%d.%d,", c1, c2, c3, c4);
+			seq_printf(m, "dstip=%d.%d.%d.%d\n", d1, d2, d3, d4);
+		} else
+			break;
+	}
+
+	return ret;
+}
+static int vtun_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, vtun_proc_show, NULL);
+}
+
+static const struct file_operations vtun_proc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= vtun_proc_open,
+	.read		= seq_read,
+	.write		= vtun_write_rules,
+};
+
+static int vtun_create_proc_entry(void)
+{
+	int ret = 0, i;
+
+	if (NULL == init_net.proc_net) {
+		pr_err("/proc/net does not exist!\n");
+		return -1;
+	}
+
+	vtun_proc_entry = proc_create("vtun_filter", 0644, init_net.proc_net, &vtun_proc_fops);
+	if (NULL == vtun_proc_entry) {
+		ret = -1;
+		pr_err("Can't create /proc/net/vtun_filter\n");
+	}
+
+	for (i=0; i<FILTER_RULES_NUM; i++) {
+		filter_rules[i].count = -1;
+	}
+
+	return ret;
+}
+
+static void vtun_remove_proc_entry(void)
+{
+	remove_proc_entry("vtun_filter", init_net.proc_net);
+	pr_info("Remove /proc/net/vtun_filter successfully!\n");
+}
+
 static int __init vtun_init(void)
 {
 	int ret = 0;
@@ -2367,7 +2486,16 @@ static int __init vtun_init(void)
 		pr_err("Can't register misc device %d\n", VTUN_MINOR);
 		goto err_misc;
 	}
+
+	/* Create proc entry /proc/net/vtun_filter */
+	ret = vtun_create_proc_entry();
+	if (-1 == ret) {
+		pr_err("Can't create proc entry!\n");
+		goto err_proc;
+	}
 	return  0;
+err_proc:
+	vtun_remove_proc_entry();
 err_misc:
 	rtnl_link_unregister(&tun_link_ops);
 err_linkops:
@@ -2379,6 +2507,7 @@ static void vtun_cleanup(void)
 {
 	misc_deregister(&tun_miscdev);
 	rtnl_link_unregister(&tun_link_ops);
+	vtun_remove_proc_entry();
 }
 /* Get an underlying socket object from tun file.  Returns error unless file is
  * attached to a device.  The returned object works like a packet socket, it

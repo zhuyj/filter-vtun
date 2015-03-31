@@ -2497,13 +2497,15 @@ err_linkops:
 
 static void vtun_cleanup(void)
 {
-	struct vtun_filter *pfilter = NULL;
+	struct vtun_filter *pfilter = NULL, *next = NULL;
 
 	misc_deregister(&tun_miscdev);
 	rtnl_link_unregister(&tun_link_ops);
 	vtun_remove_proc_entry();
 
-	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
+	list_for_each_entry_safe(pfilter, next, 
+		&vtun_filter_rules_list, list) {
+		list_del(&pfilter->list);
 		kfree(pfilter);
 		pfilter = NULL;
 	}

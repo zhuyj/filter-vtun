@@ -58,6 +58,8 @@
 
 #include <linux/proc_fs.h>
 
+#include <linux/list.h>
+
 /* Uncomment to enable debugging */
 #define TUN_DEBUG 1 
 
@@ -2351,23 +2353,25 @@ static const struct ethtool_ops tun_ethtool_ops = {
 	.get_ts_info	= ethtool_op_get_ts_info,
 };
 
-#define FILTER_RULES_NUM 16
 struct vtun_filter {
-	int count;
-	__be32 src_ip;
-	__be32 dst_ip;
-} filter_rules[FILTER_RULES_NUM];
+	__be32		src_ip;
+	__be32		dst_ip;
+	struct list_head	list;
+};
+
+static LIST_HEAD(vtun_filter_rules_list);
 
 static struct proc_dir_entry *vtun_proc_entry = NULL;
 
 static ssize_t vtun_write_rules(struct file *file, const char __user *buffer,
 				  size_t count, loff_t *pos)
 {
-	int len = 127, i;
+	int len = 127;
 	char temp[128] = {0};
 	__be32 c1, c2, c3, c4, d1, d2, d3, d4;
 	__be32 lsrc_ip;
 	__be32 ldst_ip;
+	struct vtun_filter *pfilter = NULL;
 
 	if (len > count)
 		len = count;
@@ -2390,15 +2394,10 @@ static ssize_t vtun_write_rules(struct file *file, const char __user *buffer,
 			(d2 << 16) + (d1 << 24);
 
 	printk(KERN_DEBUG "src_ip:0x%08x, dst_ip:0x%08x\n", lsrc_ip, ldst_ip);
-
-	for (i=0; i<FILTER_RULES_NUM; i++) {
-		if (filter_rules[i].count == -1) {
-			filter_rules[i].count = i;
-			filter_rules[i].src_ip = lsrc_ip;
-			filter_rules[i].dst_ip = ldst_ip;
-			break;
-		}
-	}
+	pfilter = kmalloc(sizeof(*pfilter), GFP_KERNEL);
+	pfilter->src_ip = lsrc_ip;
+	pfilter->dst_ip = ldst_ip;
+	list_add(&pfilter->list, &vtun_filter_rules_list);
 
 	return count;
 }
@@ -2406,25 +2405,22 @@ static ssize_t vtun_write_rules(struct file *file, const char __user *buffer,
 static int vtun_proc_show(struct seq_file *m, void *v)
 {
 	unsigned long	ret = 0;
-	int i;
+	struct vtun_filter *pfilter = NULL;
 
 	seq_printf(m, "srcip=xxx.xxx.xxx.xxx,dstip=xxx.xxx.xxx.xxx\n");
-	for (i=0; i<FILTER_RULES_NUM; i++) {
-		if (filter_rules[i].count != -1) {
-			unsigned char c1, c2, c3, c4, d1, d2, d3, d4;
-			c1 = (filter_rules[i].src_ip >> 24) & 0xFF;
-			c2 = (filter_rules[i].src_ip >> 16) & 0xFF;
-			c3 = (filter_rules[i].src_ip >> 8) & 0xFF;
-			c4 = filter_rules[i].src_ip & 0xFF;
-			d1 = (filter_rules[i].dst_ip >> 24) & 0xFF;
-			d2 = (filter_rules[i].dst_ip >> 16) & 0xFF;
-			d3 = (filter_rules[i].dst_ip >> 8) & 0xFF;
-			d4 = filter_rules[i].dst_ip & 0xFF;
+	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
+		unsigned char c1, c2, c3, c4, d1, d2, d3, d4;
+		c1 = (pfilter->src_ip >> 24) & 0xFF;
+		c2 = (pfilter->src_ip >> 16) & 0xFF;
+		c3 = (pfilter->src_ip >> 8) & 0xFF;
+		c4 = pfilter->src_ip & 0xFF;
+		d1 = (pfilter->dst_ip >> 24) & 0xFF;
+		d2 = (pfilter->dst_ip >> 16) & 0xFF;
+		d3 = (pfilter->dst_ip >> 8) & 0xFF;
+		d4 = pfilter->dst_ip & 0xFF;
 
-			seq_printf(m, "srcip=%d.%d.%d.%d,", c1, c2, c3, c4);
-			seq_printf(m, "dstip=%d.%d.%d.%d\n", d1, d2, d3, d4);
-		} else
-			break;
+		seq_printf(m, "srcip=%d.%d.%d.%d,", c1, c2, c3, c4);
+		seq_printf(m, "dstip=%d.%d.%d.%d\n", d1, d2, d3, d4);
 	}
 
 	return ret;
@@ -2443,7 +2439,7 @@ static const struct file_operations vtun_proc_fops = {
 
 static int vtun_create_proc_entry(void)
 {
-	int ret = 0, i;
+	int ret = 0;
 
 	if (NULL == init_net.proc_net) {
 		pr_err("/proc/net does not exist!\n");
@@ -2454,10 +2450,6 @@ static int vtun_create_proc_entry(void)
 	if (NULL == vtun_proc_entry) {
 		ret = -1;
 		pr_err("Can't create /proc/net/vtun_filter\n");
-	}
-
-	for (i=0; i<FILTER_RULES_NUM; i++) {
-		filter_rules[i].count = -1;
 	}
 
 	return ret;
@@ -2505,9 +2497,17 @@ err_linkops:
 
 static void vtun_cleanup(void)
 {
+	struct vtun_filter *pfilter = NULL;
+
 	misc_deregister(&tun_miscdev);
 	rtnl_link_unregister(&tun_link_ops);
 	vtun_remove_proc_entry();
+
+	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
+		kfree(pfilter);
+		pfilter = NULL;
+	}
+
 }
 /* Get an underlying socket object from tun file.  Returns error unless file is
  * attached to a device.  The returned object works like a packet socket, it

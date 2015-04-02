@@ -60,6 +60,8 @@
 
 #include <linux/list.h>
 
+#include <linux/ip.h>
+
 /* Uncomment to enable debugging */
 #define TUN_DEBUG 1 
 
@@ -755,6 +757,8 @@ static int tun_net_close(struct net_device *dev)
 	return 0;
 }
 
+static int vtun_run_filter(const struct sk_buff *skb);
+
 /* Net device start xmit */
 static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -790,6 +794,14 @@ static netdev_tx_t tun_net_xmit(struct sk_buff *skb, struct net_device *dev)
 	tun_debug(KERN_INFO, tun, "tun_net_xmit %d\n", skb->len);
 
 	BUG_ON(!tfile);
+
+	if (printk_ratelimit()) {
+		struct iphdr *ipheader = ip_hdr(skb);
+		printk(KERN_DEBUG "zhuyj,srcip:0x%08x, dstip:0x%08x\n", ntohl(ipheader->saddr), ntohl(ipheader->daddr));
+	}
+
+	if (!vtun_run_filter(skb))
+		goto drop;
 
 	/* Drop if the filter does not like it.
 	 * This is a noop if the filter is disabled.
@@ -2393,10 +2405,10 @@ static ssize_t vtun_write_rules(struct file *file, const char __user *buffer,
 	ldst_ip = d4 + (d3 << 8) +
 			(d2 << 16) + (d1 << 24);
 
-	printk(KERN_DEBUG "src_ip:0x%08x, dst_ip:0x%08x\n", lsrc_ip, ldst_ip);
+	printk(KERN_DEBUG "src_ip:0x%08x, dst_ip:0x%08x\n", htonl(lsrc_ip), htonl(ldst_ip));
 	pfilter = kmalloc(sizeof(*pfilter), GFP_KERNEL);
-	pfilter->src_ip = lsrc_ip;
-	pfilter->dst_ip = ldst_ip;
+	pfilter->src_ip = htonl(lsrc_ip);
+	pfilter->dst_ip = htonl(ldst_ip);
 	list_add(&pfilter->list, &vtun_filter_rules_list);
 
 	return count;
@@ -2410,14 +2422,17 @@ static int vtun_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "srcip=xxx.xxx.xxx.xxx,dstip=xxx.xxx.xxx.xxx\n");
 	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
 		unsigned char c1, c2, c3, c4, d1, d2, d3, d4;
-		c1 = (pfilter->src_ip >> 24) & 0xFF;
-		c2 = (pfilter->src_ip >> 16) & 0xFF;
-		c3 = (pfilter->src_ip >> 8) & 0xFF;
-		c4 = pfilter->src_ip & 0xFF;
-		d1 = (pfilter->dst_ip >> 24) & 0xFF;
-		d2 = (pfilter->dst_ip >> 16) & 0xFF;
-		d3 = (pfilter->dst_ip >> 8) & 0xFF;
-		d4 = pfilter->dst_ip & 0xFF;
+		__be32 local_ip;
+		local_ip = ntohl(pfilter->src_ip);
+		c1 = (local_ip >> 24) & 0xFF;
+		c2 = (local_ip >> 16) & 0xFF;
+		c3 = (local_ip >> 8) & 0xFF;
+		c4 = local_ip & 0xFF;
+		local_ip = ntohl(pfilter->dst_ip);
+		d1 = (local_ip >> 24) & 0xFF;
+		d2 = (local_ip >> 16) & 0xFF;
+		d3 = (local_ip >> 8) & 0xFF;
+		d4 = local_ip & 0xFF;
 
 		seq_printf(m, "srcip=%d.%d.%d.%d,", c1, c2, c3, c4);
 		seq_printf(m, "dstip=%d.%d.%d.%d\n", d1, d2, d3, d4);
@@ -2425,9 +2440,28 @@ static int vtun_proc_show(struct seq_file *m, void *v)
 
 	return ret;
 }
+
 static int vtun_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, vtun_proc_show, NULL);
+}
+
+/*Return 0 - drop, !=0 accept*/
+static int vtun_run_filter(const struct sk_buff *skb)
+{
+	struct vtun_filter *pfilter = NULL;
+	int ret = 0;
+	__be32 src_ip = ip_hdr(skb)->saddr;
+	__be32 dst_ip = ip_hdr(skb)->daddr;
+	
+
+	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
+		if ((src_ip == pfilter->src_ip) && (dst_ip == pfilter->dst_ip)) {
+			ret = 1;
+		}	
+	}
+
+	return ret;
 }
 
 static const struct file_operations vtun_proc_fops = {

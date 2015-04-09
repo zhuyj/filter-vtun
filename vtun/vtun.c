@@ -2451,9 +2451,15 @@ static int vtun_run_filter(const struct sk_buff *skb)
 {
 	struct vtun_filter *pfilter = NULL;
 	int ret = 0;
-	__be32 src_ip = ip_hdr(skb)->saddr;
-	__be32 dst_ip = ip_hdr(skb)->daddr;
+	__be32 src_ip;
+	__be32 dst_ip;
 	
+	/* if list is empty, accept all the packets */
+	if (list_empty(&vtun_filter_rules_list))
+		return 1;
+
+	src_ip = ip_hdr(skb)->saddr;
+	dst_ip = ip_hdr(skb)->daddr;
 
 	list_for_each_entry(pfilter, &vtun_filter_rules_list, list) {
 		if ((src_ip == pfilter->src_ip) && (dst_ip == pfilter->dst_ip)) {

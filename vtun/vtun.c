@@ -116,6 +116,8 @@ struct tap_filter {
 	unsigned char	addr[FLT_EXACT_COUNT][ETH_ALEN];
 };
 
+#define VTUN_MINOR 1
+
 /* DEFAULT_MAX_NUM_RSS_QUEUES were chosen to let the rx/tx queues allocated for
  * the netdevice to be fit in one page. So we can make sure the success of
  * memory allocation. TODO: increase the limit. */
@@ -1264,7 +1266,7 @@ static ssize_t tun_put_user(struct tun_struct *tun,
 	int vlan_hlen = 0;
 	int vnet_hdr_sz = 0;
 
-	if (vlan_tx_tag_present(skb))
+	if (skb_vlan_tag_present(skb))
 		vlan_hlen = VLAN_HLEN;
 
 	if (tun->flags & IFF_VNET_HDR)
@@ -1341,7 +1343,7 @@ static ssize_t tun_put_user(struct tun_struct *tun,
 		} veth;
 
 		veth.h_vlan_proto = skb->vlan_proto;
-		veth.h_vlan_TCI = htons(vlan_tx_tag_get(skb));
+		veth.h_vlan_TCI = htons(skb_vlan_tag_get(skb));
 
 		vlan_offset = offsetof(struct vlan_ethhdr, h_vlan_proto);
 
@@ -1467,7 +1469,7 @@ static void tun_sock_write_space(struct sock *sk)
 	kill_fasync(&tfile->fasync, SIGIO, POLL_OUT);
 }
 
-static int tun_sendmsg(struct kiocb *iocb, struct socket *sock,
+static int tun_sendmsg(struct socket *sock,
 		       struct msghdr *m, size_t total_len)
 {
 	int ret;
@@ -1483,7 +1485,7 @@ static int tun_sendmsg(struct kiocb *iocb, struct socket *sock,
 	return ret;
 }
 
-static int tun_recvmsg(struct kiocb *iocb, struct socket *sock,
+static int tun_recvmsg(struct socket *sock,
 		       struct msghdr *m, size_t total_len,
 		       int flags)
 {
@@ -2161,7 +2163,7 @@ static int tun_chr_open(struct inode *inode, struct file * file)
 	DBG1(KERN_INFO, "tunX: tun_chr_open\n");
 
 	tfile = (struct tun_file *)sk_alloc(net, AF_UNSPEC, GFP_KERNEL,
-					    &tun_proto);
+					    &tun_proto, 0);
 	if (!tfile)
 		return -ENOMEM;
 	RCU_INIT_POINTER(tfile->tun, NULL);
@@ -2220,8 +2222,6 @@ static void tun_chr_show_fdinfo(struct seq_file *m, struct file *f)
 static const struct file_operations vtun_fops = {
 	.owner	= THIS_MODULE,
 	.llseek = no_llseek,
-	.read  = new_sync_read,
-	.write = new_sync_write,
 	.read_iter  = tun_chr_read_iter,
 	.write_iter = tun_chr_write_iter,
 	.poll	= tun_chr_poll,

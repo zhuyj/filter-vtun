@@ -4,7 +4,7 @@ ifneq ($(KERNELRELEASE),)
 else
 	PWD:=$(shell pwd)
 	KVER:=$(shell uname -r)
-	KDIR:=/usr/src/linux-headers-3.19.0-rc6-zhuyj
+	KDIR:=/usr/src/linux-headers-4.2.0-rc6-dev+
 all:
 	$(MAKE) -C $(KDIR) M=$(PWD)
 install:

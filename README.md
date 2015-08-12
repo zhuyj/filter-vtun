@@ -39,3 +39,6 @@ FAQ:
 2. What is the final result?
    This tool will generate a pcap file in /tmp/temp.pcap. This temp.pcap is compatible with
    tcpdump and wireshark. We can ananlyze this file by tcpdump or wireshark.
+
+3. How to download this project?
+   git clone https://github.com/zhuyj/filter-vtun.git
